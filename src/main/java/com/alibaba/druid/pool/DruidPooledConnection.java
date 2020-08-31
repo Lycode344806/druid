@@ -232,10 +232,12 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
 
     @Override
     public void close() throws SQLException {
+        //检查，因为该连接对象是抛出去给别的业务线程使用，也就是说并不受连接池本身管控，所以很可能存在多线程同时close的操作，
+        //因此这里需要做一层检查，包括下方的syncClose里的检查也是一个意思
         if (this.disable) {
             return;
         }
-
+        //拿到对应的holder对象（之前说过，这个对象才是最后放进连接池的对象）
         DruidConnectionHolder holder = this.holder;
         if (holder == null) {
             if (dupCloseLogEnable) {
@@ -244,74 +246,77 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
             return;
         }
 
-        DruidAbstractDataSource dataSource = holder.getDataSource();
+        DruidAbstractDataSource dataSource = holder.getDataSource();//拿到对应的连接池对象
         boolean isSameThread = this.getOwnerThread() == Thread.currentThread();
         
-        if (!isSameThread) {
+        if (!isSameThread) {//关闭该连接与获取该连接的线程并非同一个的时候，则触发下面的syncClose
             dataSource.setAsyncCloseConnectionEnable(true);
         }
         
         if (dataSource.isAsyncCloseConnectionEnable()) {
-            syncClose();
+            syncClose(); //参考上面的解释，该方法详情在下方
             return;
         }
-
+        //一些事件监听器的触发，忽略
         for (ConnectionEventListener listener : holder.getConnectionEventListeners()) {
             listener.connectionClosed(new ConnectionEvent(this));
         }
 
-        
+        //责任链的执行，参考流程1.1与代码段1-2，运行方式是一样的，找到映射方法，整个触发一遍责任链上的filters
         List<Filter> filters = dataSource.getProxyFilters();
         if (filters.size() > 0) {
             FilterChainImpl filterChain = new FilterChainImpl(dataSource);
             filterChain.dataSource_recycle(this);
         } else {
-            recycle();
+            recycle();//触发目标方法recycle
         }
 
-        this.disable = true;
+        this.disable = true;//标记该连接已失效，无法再次提供服务
     }
 
+
+    //上面逻辑走syncClose的情况，该方法与上面大体相同，但由于不是同一个线程做的操作，所以这里需要锁控制
+
     public void syncClose() throws SQLException {
-        lock.lock();
+        lock.lock();//获取锁，这个锁是当前连接对象上的锁，为了解决同一个连接对象在不同的线程里被同时close多次而造成的线程安全问题
         try {
             if (this.disable) {
                 return;
             }
 
-            DruidConnectionHolder holder = this.holder;
+            DruidConnectionHolder holder = this.holder;//同样的，拿到需要归还的holder对象
             if (holder == null) {
                 if (dupCloseLogEnable) {
                     LOG.error("dup close");
                 }
                 return;
             }
-
+            //同样是一些事件监听器的触发，忽略
             for (ConnectionEventListener listener : holder.getConnectionEventListeners()) {
                 listener.connectionClosed(new ConnectionEvent(this));
             }
-
+            //同样的责任链的执行，参考上面的解释
             DruidAbstractDataSource dataSource = holder.getDataSource();
             List<Filter> filters = dataSource.getProxyFilters();
             if (filters.size() > 0) {
                 FilterChainImpl filterChain = new FilterChainImpl(dataSource);
                 filterChain.dataSource_recycle(this);
             } else {
-                recycle();
+                recycle();//触发目标方法recycle，方法详情在下方
             }
 
-            this.disable = true;
+            this.disable = true;//标记该连接已失效，无法再次提供服务
         } finally {
-            lock.unlock();
+            lock.unlock();//解锁
         }
     }
-
+    //DruidPooledConnection类的recycle方法，由上面俩方法直接触发
     public void recycle() throws SQLException {
         if (this.disable) {
             return;
         }
 
-        DruidConnectionHolder holder = this.holder;
+        DruidConnectionHolder holder = this.holder;//拿到真正需要归还的连接对象
         if (holder == null) {
             if (dupCloseLogEnable) {
                 LOG.error("dup close");
@@ -319,11 +324,11 @@ public class DruidPooledConnection extends PoolableWrapper implements javax.sql.
             return;
         }
 
-        if (!this.abandoned) {
+        if (!this.abandoned) {//如果期间已经被流程4.2处理过了（abandoned==true），则不触发下方逻辑
             DruidAbstractDataSource dataSource = holder.getDataSource();
-            dataSource.recycle(this);
+            dataSource.recycle(this);//真正触发连接池的回收方法，方法详情在下方
         }
-
+        //连接对象一旦被回收处理，则会把所有与连接相关的属性置空（不持有），closed标记为true
         this.holder = null;
         conn = null;
         transactionInfo = null;

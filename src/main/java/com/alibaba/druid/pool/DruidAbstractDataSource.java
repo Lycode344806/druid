@@ -1448,6 +1448,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
         return testConnectionInternal(null, conn);
     }
 
+    //数据库连接可用性测试
     protected boolean testConnectionInternal(DruidConnectionHolder holder, Connection conn) {
         String sqlFile = JdbcSqlStat.getContextSqlFile();
         String sqlName = JdbcSqlStat.getContextSqlName();
@@ -1459,7 +1460,9 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
             JdbcSqlStat.setContextSqlName(null);
         }
         try {
-            if (validConnectionChecker != null) {
+            if (validConnectionChecker != null) {//checker不为空
+                //checker是init（主流程2）里通过驱动进行适配的检测者，因为本篇文章基于mysql，
+                // 所以假设这里适配到的checker是MySqlValidConnectionChecker类型的
                 boolean valid = validConnectionChecker.isValidConnection(conn, validationQuery, validationQueryTimeout);
                 long currentTimeMillis = System.currentTimeMillis();
                 if (holder != null) {
@@ -1468,6 +1471,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
                 }
 
                 if (valid && isMySql) { // unexcepted branch
+                    //这里在现有驱动版本的情况下拿到的lastPacketReceivedTimeMs始终小于0，因为找不到com.mysql.jdbc.MySQLConnection
                     long lastPacketReceivedTimeMs = MySqlUtils.getLastPacketReceivedTimeMs(conn);
                     if (lastPacketReceivedTimeMs > 0) {
                         long mysqlIdleMillis = currentTimeMillis - lastPacketReceivedTimeMs;
@@ -1495,15 +1499,15 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
                     }
                 }
 
-                return valid;
+                return valid;//返回验证结果
             }
 
             if (conn.isClosed()) {
                 return false;
             }
-
+            //checker为空时，就直接利用validationQuery进行常规测试
             if (null == validationQuery) {
-                return true;
+                return true;//validationQuery为空就单纯返回true
             }
 
             Statement stmt = null;
@@ -1515,9 +1519,10 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
                 }
                 rset = stmt.executeQuery(validationQuery);
                 if (!rset.next()) {
-                    return false;
+                    return false;//执行检测语句失败，返回false
                 }
             } finally {
+                //关闭资源
                 JdbcUtils.close(rset);
                 JdbcUtils.close(stmt);
             }
@@ -1533,7 +1538,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
                 }
             }
 
-            return true;
+            return true;//验证通过返回true
         } catch (Throwable ex) {
             // skip
             return false;
@@ -1651,6 +1656,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
         return conn;
     }
 
+    //获取链接
     public PhysicalConnectionInfo createPhysicalConnection() throws SQLException {
         String url = this.getUrl();
         Properties connectProperties = getConnectProperties();
@@ -1663,6 +1669,7 @@ public abstract class DruidAbstractDataSource extends WrapperAdapter implements 
         }
 
         String password = getPassword();
+        //获取密码
         PasswordCallback passwordCallback = getPasswordCallback();
 
         if (passwordCallback != null) {

@@ -485,9 +485,10 @@ public class FilterChainImpl implements FilterChain {
                 .nativeSQL(sql);
     }
 
+    //FilterChainImpl类里的方法：获取下一个需要执行的filter
     private Filter nextFilter() {
         return getFilters()
-                .get(pos++);
+                .get(pos++); //根据游标计算
     }
 
     @Override
@@ -5049,13 +5050,16 @@ public class FilterChainImpl implements FilterChain {
         connection.recycle();
     }
 
+    //FilterChainImpl类里的方法：获取连接映射方法
     @Override
     public DruidPooledConnection dataSource_connect(DruidDataSource dataSource, long maxWaitMillis) throws SQLException {
         if (this.pos < filterSize) {
-            DruidPooledConnection conn = nextFilter().dataSource_getConnection(this, dataSource, maxWaitMillis);
+            // 除了FilterChainImpl里面包含一些datasource的映射方法，需要执行的filter里面也包括，
+            // 比如下面的dataSource_getConnection方法
+            DruidPooledConnection conn = nextFilter().dataSource_getConnection(this, dataSource, maxWaitMillis);//根据下标，获取下一个filter，触发目标方法
             return conn;
         }
-
+        //执行到最后一个filter时，触发datasource，返回真正的连接
         return dataSource.getConnectionDirect(maxWaitMillis);
     }
 

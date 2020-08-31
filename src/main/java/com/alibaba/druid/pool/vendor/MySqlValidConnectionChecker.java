@@ -45,6 +45,7 @@ public class MySqlValidConnectionChecker extends ValidConnectionCheckerAdapter i
     private Method   ping;
     private boolean  usePingMethod = false;
 
+    //Mysql对应的checker构造器
     public MySqlValidConnectionChecker(){
         try {
             clazz = Utils.loadClass("com.mysql.jdbc.MySQLConnection");
@@ -53,6 +54,7 @@ public class MySqlValidConnectionChecker extends ValidConnectionCheckerAdapter i
             }
 
             if (clazz != null) {
+                //如果驱动程序本身有ping方法，则下面的usePingMethod设置为true，后续连接保活测试就会采用ping.invoke的方式触发。
                 ping = clazz.getMethod("pingInternal", boolean.class, int.class);
             }
 
@@ -84,12 +86,13 @@ public class MySqlValidConnectionChecker extends ValidConnectionCheckerAdapter i
         this.usePingMethod = usePingMethod;
     }
 
-    public boolean isValidConnection(Connection conn, String validateQuery, int validationQueryTimeout) throws Exception {
+    //MySqlValidConnectionChecker类里的验证方法
+    public boolean  isValidConnection(Connection conn, String validateQuery, int validationQueryTimeout) throws Exception {
         if (conn.isClosed()) {
             return false;
         }
 
-        if (usePingMethod) {
+        if (usePingMethod) {//是否启用ping方法（如果驱动程序有该方法，则这里为true，一般情况下都是true）
             if (conn instanceof DruidPooledConnection) {
                 conn = ((DruidPooledConnection) conn).getConnection();
             }
@@ -104,18 +107,19 @@ public class MySqlValidConnectionChecker extends ValidConnectionCheckerAdapter i
                 }
 
                 try {
+                    //ping对象是初始化时拿到驱动程序的一个Method对象，这里通过invoke触发调用
                     ping.invoke(conn, true, validationQueryTimeout * 1000);
                 } catch (InvocationTargetException e) {
                     Throwable cause = e.getCause();
                     if (cause instanceof SQLException) {
                         throw (SQLException) cause;
                     }
-                    throw e;
+                    throw e;//ping出错抛异常
                 }
-                return true;
+                return true;//通过则返回true
             }
         }
-
+        //如果不支持ping方式检测，则触发SELECT 1的方式进行检测（一般情况下不会触发，都是上面ping方式）
         String query = validateQuery;
         if (validateQuery == null || validateQuery.isEmpty()) {
             query = DEFAULT_VALIDATION_QUERY;
